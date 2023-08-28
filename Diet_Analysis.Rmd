@@ -1,0 +1,208 @@
+# Load Libraries
+```{r}
+library(ComplexHeatmap) # for pheatmap
+library(ggplotify) # to convert to ggplot format for ggsave
+library(ggplot2) # ggsave
+```
+
+
+# Diet Pathway files
+```{r}
+diet_file_path <- c(
+  "R Processed Data/BBdiet.csv",
+  "R Processed Data/HMPdiet.csv",
+  "R Processed Data/BBdiet.csv",
+  "R Processed Data/HMPdiet.csv"
+)
+diet_file_name <- c(
+  "UK Biobank",
+  "HMP2 IBDMDB",
+  "UK Biobank",
+  "HMP2 IBDMDB"
+)
+
+SHAPmetabolite_file_path <- c(
+  "Machine Learning & Explainable AI/Metabolomics/Shap Ranked for All UK Biobank.csv",
+  "Machine Learning & Explainable AI/Metabolomics/Shap Ranked for All HMP2 IBDMDB.csv",
+  "Machine Learning & Explainable AI/Metabolomics/Shap Ranked for Common UK Biobank.csv",
+  "Machine Learning & Explainable AI/Metabolomics/Shap Ranked for Common HMP2 IBDMDB.csv"
+)
+
+SHAPmetabolite_file_name <- c(
+  "UK Biobank (SHAP Ranked Metabolites)",
+  "HMP2 IBDMDB (SHAP Ranked Metabolites)",
+  "UK Biobank (SHAP Ranked Common Metabolites)",
+  "HMP2 IBDMDB (SHAP Ranked Common Metabolites)"
+)
+```
+
+
+# DIET - DIET CORRELATION
+```{r}
+for (i in 1:length(diet_file_name[1:2])) {
+  file_name <- diet_file_name[i]
+  x <- read.csv(diet_file_path[i], row.names = 1)
+  y <- x
+  
+  ## Calculate correlation and p-values and stars
+  n <- n <- t(!is.na(x)) %*% (!is.na(y))  # Count non-missing pairs
+    r <- cor(x, y, use = "pairwise.complete.obs")  # Calculate correlations
+
+  cor2pvalue = function(r, n) {
+    t <- (r * sqrt(n - 2)) / sqrt(1 - r^2)
+    p <- 2 * (1 - pt(abs(t), (n - 2)))
+    out <- list(r = r, n = n, t = t, p = p)
+    return(out)
+  }
+  
+  # Call the function to extract correlations, p-values, stars, and standard errors
+  result <- cor2pvalue(r, n)
+  
+  # Plot Heatmap of Diet-Metabolite Correlations
+  h <- pheatmap(result$r,
+         color = colorRampPalette(c("blue", "white", "red"))(100),
+         fontsize_row = 10,  # Adjust row label font size
+         fontsize_col = 10,  # Adjust column label font size
+         main = paste0("Diet-Diet Correlation Heatmap for ", file_name),
+         border_color = NA,  # Remove cell borders
+         cluster_cols = TRUE,  # Don't cluster columns
+         show_colnames = TRUE,  # Show column names
+         show_rownames = TRUE,
+         name = "Spearman\nCorrelation",
+        fontsize = 10,
+)
+
+  ggsave(paste0("Statistical Analysis/Diet/Diet/",file_name, " Diet-Diet Spearman_Corr_Pheatmap.png"), plot = as.ggplot(grid.grabExpr(draw(h))), width = 8, height = 7, dpi = 300)
+
+}
+```
+
+
+# DIET - METABOLITE CORRELATION
+```{r}
+for (i in 1:length(diet_file_name)) {
+  file_name <- SHAPmetabolite_file_name[i]
+  x <- read.csv(diet_file_path[i], row.names = 1)
+  y <- read.csv(SHAPmetabolite_file_path[i], row.names = 1)
+  y <- y[, -which(colnames(y) =="Label")]
+  
+    if (i == 2) {
+    split_index <- ceiling(ncol(y) / 4)
+    y <- y[, 1:split_index]
+    x <- x[rownames(y), ]
+  } # for the HMP2 since it has a lot of metabolites
+  
+  ## Calculate correlation and p-values and stars
+  n <- n <- t(!is.na(x)) %*% (!is.na(y))  # Count non-missing pairs
+    r <- cor(x, y, use = "pairwise.complete.obs")  # Calculate correlations
+
+  cor2pvalue = function(r, n) {
+    t <- (r * sqrt(n - 2)) / sqrt(1 - r^2)
+    p <- 2 * (1 - pt(abs(t), (n - 2)))
+    p.adj <- p.adjust(p, method = "bonferroni")
+    
+    # change the format of p.adj to fit p
+    # Number of columns and rows
+    num_columns <- ncol(y)
+    num_rows <- length(p.adj) %/% num_columns
+    
+    # Create a matrix
+    p.adj <- matrix(p.adj, ncol = num_columns, byrow = TRUE)
+    colnames(p.adj) <- colnames(y)
+    rownames(p.adj) <- colnames(x)
+
+    stars <- ifelse(p.adj <= 0.05, ifelse(p.adj <= 0.01, ifelse(p.adj <= 0.001, "***", "**"), "*"), "")
+    out <- list(r = r, n = n, t = t, p = p, p.adj = p.adj, stars = stars)
+    return(out)
+  }
+  
+  # Call the function to extract correlations, p-values, stars, and standard errors
+  result <- cor2pvalue(r, n)
+  
+  if (i == 1) {
+    w = 13
+    h = 6.5
+    f = 14
+    fr = 11
+    fc = 11
+    file_name_map <- file_name
+  }
+  
+  if (i == 2) {
+    w = 16
+    h = 8
+    f = 16
+    fr = 13
+    fc = 13
+    file_name_map <- file_name
+  }
+  if (i == 3) {
+    w = 7
+    h = 6
+    f = 10
+    fr = 10
+    fc = 10
+    file_name_map <- paste0("\n ", file_name)
+  }
+  if (i == 4) {
+    w = 7
+    h = 6
+    f = 10
+    fr = 10
+    fc = 10
+    file_name_map <- paste0("\n ", file_name)
+  }
+  
+  # Plot Heatmap of Diet-Metabolite Correlations
+  p <- pheatmap(result$r,
+         color = colorRampPalette(c("blue", "white", "red"))(100),
+         fontsize_row = fr,  # Adjust row label font size
+         fontsize_col = fc,  # Adjust column label font size
+         main = paste0("Diet-Metabolite Correlation Heatmap for ", file_name_map),
+         border_color = NA,  # Remove cell borders
+         cluster_cols = FALSE,  # Don't cluster columns
+         show_colnames = TRUE,  # Show column names
+         show_rownames = TRUE,
+         display_numbers = result$stars,
+         name = "Spearman\nCorrelation",
+         fontsize = f,
+         fontsize_number = f
+)
+
+  ggsave(paste0("Statistical Analysis/Diet/Metabolomics/",file_name, "Diet Spearman_Corr_Pheatmap.png"), plot = as.ggplot(grid.grabExpr(draw(p))), width = w, height = h, dpi = 1000)
+
+}
+```
+
+# METABOLITE-METABOLITE CORRELATION
+```{r}
+comp_metab_data_file_path <- c("R Processed Data/BB_imp_sc_trans_label.csv",
+                          "R Processed Data/HMP_imp_sc_trans_label.csv")
+comp_metab_data_file_name <- c("Comprehensive UK Biobank",
+                          "Comprehensive HMP2 IBDMDB")
+
+for (i in 1:length(comp_metab_data_file_path)) {
+  file_name <- comp_metab_data_file_name[i]
+  x <- read.csv(comp_metab_data_file_path[i], row.names = 1)
+  x <- x[, -1]
+  colnames(x) <- sort(colnames(x))
+  cor_x <- cor(x, method = "spearman")
+  
+  # Plot Heatmap of Diet-Metabolite Correlations
+  h <- pheatmap(cor_x,
+         color = colorRampPalette(c("blue", "white", "red"))(100),
+         fontsize_row = 10,  # Adjust row label font size
+         fontsize_col = 10,  # Adjust column label font size
+         main = paste0("Metabolite-Metabolite Correlation Heatmap for ", file_name),
+         border_color = NA,  # Remove cell borders
+         cluster_cols = TRUE,  # Don't cluster columns
+         cluster_rows = TRUE,
+         show_colnames = TRUE,  # Show column names
+         show_rownames = TRUE,
+         name = "Spearman\nCorrelation",
+)
+
+  ggsave(paste0("Statistical Analysis/Metabolomics/", file_name, " Metabolite-Metabolite Spearman_Corr_Pheatmap.png"), plot = as.ggplot(grid.grabExpr(draw(h))), width = 30, height = 30, dpi = 300)
+
+}
+```

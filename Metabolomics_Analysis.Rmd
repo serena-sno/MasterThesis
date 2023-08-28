@@ -1,0 +1,259 @@
+---
+title: "Statistical Analysis"
+output: html_document
+date: "2023-05-09"
+---
+
+```{r}
+rm (list = ls())
+```
+
+```{r}
+# load libraries
+library(tidyverse) # for data manipulation and visualization
+library(ComplexHeatmap) # for heatmaps
+library(ggplotify) # for converting to ggplot format
+library(rstatix) # provides pipe-friendly R functions for easy statistical analyses
+library(ggpubr) # creates easily publication ready plots 
+library(reshape2) # for melting
+library(circlize) # to generate colorRamp2
+```
+
+```{r setup, include=FALSE}
+setwd(dir = "C:/Users/lenovo/Documents/Serena/Thesis")
+```
+
+
+# READ IN DATA
+```{r}
+
+file_path = c("R Processed Data/BB_imp_sc_trans_filt_label.csv", 
+              "R Processed Data/HMP_imp_sc_trans_filt_label.csv", 
+              "R Processed Data/BB_HMPcommon_imp_sc_trans_label.csv",
+              "R Processed Data/HMP_BBcommon_imp_sc_trans_label.csv")
+
+file_name = c("UK Biobank",
+              "HMP2 IBDMDB",
+              "UK Biobank (Common)",
+              "HMP2 IBDMDB (Common)")
+
+# >>> ANNOTATE HERE <<<
+# choose the index of desired data:
+n <- 2
+
+# read in data
+file_path <- file_path[n]
+file_name <- file_name[n]
+
+data <- read.csv(file_path, header = T, row.names = 1)
+
+# Reorder the rows of data.X and data.Y
+data.X <- data[, -1]
+data.Y <- data[, 1, drop = FALSE]
+names(data.Y) <- "class"
+data.Y$class <- relevel(factor(data.Y$class), ref = "IBD")
+```
+
+
+# visualize with PCA
+```{r}
+# Choose the principal components
+pc1 <- 1
+pc2 <- 2
+
+# Perform PCA on the read.count data
+pca <- prcomp(data.X, scale = TRUE)
+
+# Access PCA results
+# summary(pca)  # Summary of PCA results
+
+# the select pcs for the plot
+pcs <- pc1:pc2
+  
+# Calculate the variance explained percentage
+variance <- round(100 * pca$sdev^2 / sum(pca$sdev^2), 1)
+  
+# Create the plot data
+plot_data <- data.frame(pca$x, class = data.Y)
+
+# Create the plot with labels and variance explained percentage
+p <- ggplot(plot_data, aes(x = PC1, y = PC2, color = class)) +
+    geom_point(size = 2.5, shape = 16) +
+    theme_pubr() +
+    labs(x = sprintf("PC%d (%.1f%%)", pcs[1], variance[pcs[1]]), 
+         y = sprintf("PC%d (%.1f%%)", pcs[2], variance[pcs[2]])) + 
+  theme(plot.title = element_text(size = 20),
+        axis.title = element_text(size = 16),
+        axis.line = element_line(linewidth = 0.9),
+        axis.ticks = element_line(linewidth = 0.9),
+        axis.text = element_text(size = 16),
+        legend.title = element_text(size = 18),
+        legend.text = element_text(size = 17)) +
+   ggtitle(paste0("PCA Plot for ", file_name))
+ 
+p
+
+ggsave(paste0("Statistical Analysis/Metabolomics/", file_name, "_PCA.png"), plot = p, width = 7, height = 6, dpi = 300)
+```
+
+
+# EXPLORATORY ANALYSIS: METABOLITE-SAMPLE HEATMAP
+```{r}
+show_met_names <- FALSE
+
+if (n == 3 | n == 4){
+  show_met_names <- TRUE
+}
+# col_fun = colorRamp2(c(-2, 2), c("red", "blue"))
+# # col_fun(seq(-3,3))
+
+# c("IBD" = "#FF9E81FF", "nonIBD" = "#7145FFFF")
+
+# data.X is a data frame with sample ID as rows, and features (metabolites) as columns, so i am transposing it
+
+# data.Y is a data frame with samples as rows, with one of the columns being the label (site/class) 
+
+heatmap_data <- t(data.X)
+heatmap_label <- data.Y$class
+
+# set.seed(2897) # tweak the seed number it to change the color of the groups
+
+colAnn <- HeatmapAnnotation(class = data.Y$class, which = "col",
+                  annotation_legend_param =
+                               list(
+                                    title = "class",
+                                    at = c("IBD", "nonIBD"),
+                                    labels = c("IBD", "Non-IBD")
+                                  ),
+                  col = list(class = c("IBD" = "brown", "nonIBD" = "darkblue"))
+                              )
+
+j <- Heatmap(heatmap_data, 
+             column_order = colnames(heatmap_data),
+             column_title = paste0("Heatmap of ", file_name), 
+             cluster_columns = cluster_within_group(heatmap_data, heatmap_label), 
+             name = "mat", column_split = 2, 
+             row_title = NULL, #"cluster_within_group",
+             top_annotation = colAnn,
+             show_column_names = F, 
+             show_row_names = show_met_names,
+             show_column_dend = F,
+             column_title_gp = grid::gpar(fontsize = 16),
+             )
+
+j
+
+# 
+ggsave(paste0("Statistical Analysis/Metabolomics/", file_name, "_ComplexHeatmap.png"), plot = as.ggplot(grid.grabExpr(draw(j))), width = 6, height = 4, dpi = 300)
+```
+
+## PATHWAY ANALYSIS
+```{r}
+
+# only done for the entire metabolite sets of both cohorts
+
+pathway_path <- c("R Processed Data/For MetaboAnalyst/BB_PathwayAnalysis/pathway_results.csv",
+                  "R Processed Data/For MetaboAnalyst/HMP_PathwayAnalysis/pathway_results.csv")
+pathway_name <- c("UK Biobank",
+                  "HMP2 IBDMDB")
+
+i <- 1
+
+if (i %in% c(3,4)) {
+  i <- 2 # or 1
+}
+
+pathway_path <- pathway_path[i]
+pathway_name <- pathway_name[i]
+
+pathway_results <- read.csv(pathway_path, header = TRUE)
+pathway_results <- pathway_results %>% 
+  filter(FDR < 0.1, Impact > 0) %>%
+  arrange(Impact) %>%
+  mutate(stars = ifelse(FDR < 0.001, "***", ifelse(FDR < 0.01, "**", ifelse(FDR < 0.05, "*", "NA"))))
+
+# for the legend
+min_value <- min(pathway_results$FDR)
+mean_value <- mean(pathway_results$FDR)
+max_value <- max(pathway_results$FDR)
+
+if (i == 1) {
+  middle_legend_scale <- 0.1
+}
+if (i == 2) {
+  middle_legend_scale <- 0.3
+}
+
+# Define custom breaks and labels based on the desired legend appearance
+breaks <- c(min_value, 
+            mean_value + (max_value - mean_value) * middle_legend_scale,
+            max_value)
+labels <- c(signif(min_value, 3), 
+            signif(mean_value + (max_value - mean_value) * middle_legend_scale, 4),
+            signif(max_value, 3))
+
+h <- ggplot(pathway_results, aes(x = X, y = Impact, fill = FDR)) +
+    coord_flip() +
+  theme_pubr() +
+    scale_x_discrete(limits = pathway_results$X) +
+    # scale_y_continuous(limits = c(0, max(pathway_results$Impact) + 0.1), breaks = seq(0, max(pathway_results$Impact), by = 0.05)) +
+    geom_bar(stat = "identity", position = "identity") +
+    scale_fill_gradient(high = "gold", low = "red", 
+                         guide = guide_colorbar(reverse = TRUE),
+                        breaks = breaks, 
+                        labels = labels) +
+    # geom_text(aes(label = stars), vjust = 0.7, hjust = -0.35, size = 4) +
+    labs(x = "Pathway", y = "Pathway Impact", fill = "P.adj") +
+    theme(plot.title = element_text(size = 18),
+          axis.title = element_text(size = 15),
+          axis.text = element_text(size = 14),
+          legend.position = c(0.9,0.17),
+          legend.text = element_text(size = 13)) +
+    ggtitle(paste0("Significant Metabolic Pathways for ", pathway_name)) 
+h
+
+ggsave(paste0("Statistical Analysis/Metabolomics/", pathway_name, "_PathwayBarChart.png"), plot = h, width = 10, height = 6, dpi = 400)
+
+```
+
+
+
+```{r}
+# Install and load the VennDiagram package
+library(VennDiagram)
+thr <- 0.1
+imp <- 0.1
+
+pathway_path <- c("R Processed Data/For MetaboAnalyst/BB_PathwayAnalysis/pathway_results.csv",
+                  "R Processed Data/For MetaboAnalyst/HMP_PathwayAnalysis/pathway_results.csv")
+pathway_name <- c("UK Biobank",
+                  "HMP2 IBDMDB")
+pathway_results <- read.csv(pathway_path[1], header = TRUE)
+pathway_results_UKB <- pathway_results %>% 
+  filter(FDR < thr, Impact > imp)
+pathways_UKB <- pathway_results_UKB$X
+
+pathway_results <- read.csv(pathway_path[2], header = TRUE)
+pathway_results_HMP2DB <- pathway_results %>% 
+  filter(FDR < thr, Impact > imp)
+pathways_HMP2DB <- pathway_results_HMP2DB$X
+
+
+# Create a Venn diagram
+venn.plot <- venn.diagram(
+  x = list(B = pathways_UKB, B = pathways_HMP2DB), 
+  rotation.degree = 180,
+  # category.names = c(pathway_name[1], pathway_name[2]),
+  category.cex = 0,
+  filename = NULL
+)
+
+# Display the Venn diagram
+grid.draw(venn.plot)
+```
+
+```{r}
+save(list = ls(), file = "Metabolomics_Analysis.RData")
+```
+
+```
